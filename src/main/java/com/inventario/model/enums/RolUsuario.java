@@ -1,4 +1,7 @@
 package com.inventario.model.enums;
 
-public class RolUsuario {
+public enum RolUsuario {
+    ADMINISTRADOR_GENERAL,
+    GERENTE_SUCURSAL,
+    OPERADOR_INVENTARIO
 }

@@ -1,4 +1,14 @@
 package com.inventario.dto.response;
 
-public record SucursalDTO() {
-}
+import java.time.LocalDateTime;
+
+public record SucursalDTO(
+        Long id,
+        String nombre,
+        String direccion,
+        String telefono,
+        String ciudad,
+        String pais,
+        boolean activa,
+        LocalDateTime fechaCreacion
+) {}
