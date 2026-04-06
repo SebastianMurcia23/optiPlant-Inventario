@@ -23,9 +23,9 @@ public class LoteProductoServicioImpl implements LoteProductoServicio {
 
     @Override
     public LoteProducto registrar(Long productoId, Long sucursalId,
-                                  String numeroLote, int cantidad,
-                                  LocalDate fechaFabricacion,
-                                  LocalDate fechaVencimiento) throws Exception {
+        String numeroLote, int cantidad,
+        LocalDate fechaFabricacion,
+        LocalDate fechaVencimiento) throws Exception {
         Producto producto = productoServicio.obtenerEntidad(productoId);
         Sucursal sucursal = sucursalServicio.obtenerEntidad(sucursalId);
 
