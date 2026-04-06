@@ -1,69 +1,70 @@
 package com.inventario.config;
-
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.stereotype.Component;
-
-import javax.crypto.SecretKey;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.Map;
+import javax.crypto.SecretKey;
 
 @Component
 public class JWTUtils {
 
-    private static final String CLAVE_SECRETA =
-            "inventario-multi-sucursal-secret-key-2024-segura";
+    private static final String SECRET = "inventario-sistema-clave-super-secreta-2024-jwt-token";
+    private static final long EXPIRATION = 1000L * 60 * 60 * 8; // 8 horas
 
-    public String generarToken(String email, Map<String, Object> claims) {
-        Instant now = Instant.now();
+    private SecretKey getKey() {
+        return Keys.hmacShaKeyFor(SECRET.getBytes());
+    }
+
+    public String generarToken(Long usuarioId, String email,
+                               String rol, String nombre, Long sucursalId) {
         return Jwts.builder()
-                .claims(claims)
-                .subject(email)
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plus(8L, ChronoUnit.HOURS)))
-                .signWith(getKey())
+                .setSubject(email)
+                .addClaims(Map.of(
+                        "usuarioId",  usuarioId,
+                        "rol",        rol,
+                        "nombre",     nombre,
+                        "sucursalId", sucursalId != null ? sucursalId : ""
+                ))
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + EXPIRATION))
+                .signWith(getKey(), SignatureAlgorithm.HS384)
                 .compact();
     }
 
-    public Jws<Claims> parseJwt(String jwtString)
-            throws ExpiredJwtException, UnsupportedJwtException,
-            MalformedJwtException, IllegalArgumentException {
-        JwtParser parser = Jwts.parser()
-                .verifyWith(getKey())
-                .build();
-        return parser.parseSignedClaims(jwtString);
-    }
-
     public String obtenerEmail(String token) {
-        return parseJwt(token).getPayload().getSubject();
-    }
-
-    public String obtenerRol(String token) {
-        return parseJwt(token).getPayload().get("rol", String.class);
+        return getClaims(token).getSubject();
     }
 
     public Long obtenerUsuarioId(String token) {
-        Object id = parseJwt(token).getPayload().get("id");
-        return id != null ? ((Number) id).longValue() : null;
+        Object id = getClaims(token).get("usuarioId");
+        return id instanceof Integer ? ((Integer) id).longValue() : (Long) id;
+    }
+
+    public String obtenerRol(String token) {
+        return (String) getClaims(token).get("rol");
     }
 
     public Long obtenerSucursalId(String token) {
-        Object sucursalId = parseJwt(token).getPayload().get("sucursalId");
-        return sucursalId != null ? ((Number) sucursalId).longValue() : null;
+        Object id = getClaims(token).get("sucursalId");
+        if (id == null || id.toString().isEmpty()) return null;
+        return id instanceof Integer ? ((Integer) id).longValue() : (Long) id;
     }
 
-    public boolean esTokenValido(String token) {
+    public boolean validarToken(String token) {
         try {
-            parseJwt(token);
+            getClaims(token);
             return true;
-        } catch (Exception e) {
+        } catch (JwtException e) {
             return false;
         }
     }
 
-    private SecretKey getKey() {
-        return Keys.hmacShaKeyFor(CLAVE_SECRETA.getBytes());
+    private Claims getClaims(String token) {
+        return Jwts.parser()
+                .setSigningKey(getKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
     }
 }

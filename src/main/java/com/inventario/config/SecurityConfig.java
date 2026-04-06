@@ -18,36 +18,27 @@ public class SecurityConfig {
 
     private final FiltroToken filtroToken;
 
-    // Desactiva el UserDetailsService automático de Spring
-    // que genera la contraseña aleatoria en consola
     @Bean
     public UserDetailsService userDetailsService() {
-        return username -> {
-            throw new UnsupportedOperationException(
-                    "Autenticación manejada por JWT — no usar UserDetailsService");
-        };
+        return username -> { throw new UnsupportedOperationException("JWT auth"); };
     }
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
-                .sessionManagement(session ->
-                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .sessionManagement(s ->
+                        s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
-                                "/api/auth/**",
-                                "/api/util/**",
-                                "/swagger-ui/**",
-                                "/swagger-ui.html",
-                                "/v3/api-docs/**",
-                                "/actuator/**"
+                                "/api/auth/**", "/api/util/**",
+                                "/swagger-ui/**", "/swagger-ui.html",
+                                "/v3/api-docs/**"
                         ).permitAll()
                         .anyRequest().permitAll()
                 )
                 .addFilterBefore(filtroToken,
                         UsernamePasswordAuthenticationFilter.class);
-
         return http.build();
     }
 }
