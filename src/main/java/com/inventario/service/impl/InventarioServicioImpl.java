@@ -1,41 +1,21 @@
 package com.inventario.service.impl;
 
-import com.inventario.config.JWTUtils;
-import com.inventario.dto.MensajeDTO;
 import com.inventario.dto.request.AjustarStockDTO;
 import com.inventario.dto.response.InventarioItemDTO;
 import com.inventario.model.*;
-import com.inventario.model.enums.TipoAlerta;
 import com.inventario.model.enums.EstadoAlerta;
+import com.inventario.model.enums.TipoAlerta;
 import com.inventario.model.enums.TipoMovimiento;
 import com.inventario.repository.*;
 import com.inventario.service.interfaces.InventarioServicio;
-import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * ══════════════════════════════════════════════════════════════════
- * SERVICIO DE INVENTARIO — Con filtro RBAC automático por sucursal
- * ══════════════════════════════════════════════════════════════════
- *
- * REGLA DE NEGOCIO CRÍTICA (OptiPlant 6.2):
- *
- *   - ADMINISTRADOR_GENERAL → Ve TODAS las sucursales
- *   - GERENTE_SUCURSAL      → Solo ve SU sucursal (del JWT)
- *   - OPERADOR_INVENTARIO   → Solo ve SU sucursal (del JWT)
- *
- * El método auxiliar validarAccesoSucursal() se usa en TODOS los
- * endpoints para garantizar que un Gerente/Operador nunca pueda
- * consultar ni modificar inventario de otra sucursal.
- * ══════════════════════════════════════════════════════════════════
- */
 @Service
 @RequiredArgsConstructor
 @Transactional
@@ -47,177 +27,49 @@ public class InventarioServicioImpl implements InventarioServicio {
     private final MovimientoInventarioRepository movimientoRepo;
     private final UsuarioRepository usuarioRepo;
     private final AlertaRepository alertaRepo;
-    private final JWTUtils jwtUtils;
-    private final HttpServletRequest request;
 
-    // ════════════════════════════════════════════════════════════
-    // MÉTODOS AUXILIARES RBAC
-    // ════════════════════════════════════════════════════════════
-
-    /**
-     * Extrae el token JWT del header Authorization de la request actual.
-     */
-    private String obtenerToken() {
-        String header = request.getHeader("Authorization");
-        if (header != null && header.startsWith("Bearer ")) {
-            return header.replace("Bearer ", "");
-        }
-        throw new RuntimeException("Token no proporcionado");
-    }
-
-    /**
-     * Obtiene el rol del usuario actual desde el JWT.
-     */
-    private String obtenerRolActual() {
-        return jwtUtils.obtenerRol(obtenerToken());
-    }
-
-    /**
-     * Obtiene el ID de sucursal del usuario actual desde el JWT.
-     * Retorna null para ADMINISTRADOR_GENERAL (no tiene sucursal fija).
-     */
-    private Long obtenerSucursalIdActual() {
-        return jwtUtils.obtenerSucursalId(obtenerToken());
-    }
-
-    /**
-     * Obtiene el ID del usuario actual desde el JWT.
-     */
-    private Long obtenerUsuarioIdActual() {
-        return jwtUtils.obtenerUsuarioId(obtenerToken());
-    }
-
-    /**
-     * ══════════════════════════════════════════════════════════════
-     * VALIDACIÓN RBAC CENTRAL
-     * ══════════════════════════════════════════════════════════════
-     *
-     * Si el usuario NO es ADMINISTRADOR_GENERAL, verifica que el
-     * sucursalId solicitado coincida con la sucursal asignada en
-     * su JWT. Si no coincide, lanza excepción.
-     *
-     * Esto impide que un Gerente/Operador de la Sucursal Centro
-     * consulte o modifique inventario de la Sucursal Norte.
-     */
-    private void validarAccesoSucursal(Long sucursalIdSolicitado) throws Exception {
-        String rol = obtenerRolActual();
-
-        // Admin tiene acceso total — sin restricciones
-        if ("ADMINISTRADOR_GENERAL".equals(rol)) {
-            return;
-        }
-
-        // Gerente y Operador: solo su propia sucursal
-        Long sucursalIdUsuario = obtenerSucursalIdActual();
-        if (sucursalIdUsuario == null) {
-            throw new Exception("Tu usuario no tiene una sucursal asignada. Contacta al administrador.");
-        }
-        if (!sucursalIdUsuario.equals(sucursalIdSolicitado)) {
-            throw new Exception(
-                    "Acceso denegado: no tienes permiso para operar sobre el inventario de otra sucursal."
-            );
-        }
-    }
-
-    /**
-     * Para Admin: retorna la sucursal solicitada o todas.
-     * Para Gerente/Operador: siempre retorna SU sucursal, ignorando
-     * cualquier parámetro que intente pasar.
-     */
-    private Long resolverSucursalId(Long sucursalIdParametro) {
-        String rol = obtenerRolActual();
-
-        if ("ADMINISTRADOR_GENERAL".equals(rol)) {
-            // Admin puede consultar cualquier sucursal
-            return sucursalIdParametro;
-        }
-
-        // Gerente/Operador: forzar su propia sucursal siempre
-        Long sucursalIdUsuario = obtenerSucursalIdActual();
-        return sucursalIdUsuario != null ? sucursalIdUsuario : sucursalIdParametro;
-    }
-
-    // ════════════════════════════════════════════════════════════
-    // CONSULTAS DE INVENTARIO
-    // ════════════════════════════════════════════════════════════
-
+    // ─── Interfaz: listarInventarioSucursal ──────────────────
     @Override
     @Transactional(readOnly = true)
-    public List<InventarioItemDTO> listarPorSucursal(Long sucursalId) throws Exception {
-        // RBAC: validar que puede ver esta sucursal
-        Long sucursalReal = resolverSucursalId(sucursalId);
-        validarAccesoSucursal(sucursalReal);
-
-        return inventarioRepo.findBySucursalId(sucursalReal)
-                .stream()
-                .map(this::toDTO)
-                .collect(Collectors.toList());
+    public List<InventarioItemDTO> listarInventarioSucursal(Long sucursalId) {
+        return inventarioRepo.findBySucursalId(sucursalId)
+                .stream().map(this::toDTO).collect(Collectors.toList());
     }
 
+    // ─── Interfaz: obtenerStock ───────────────────────────────
     @Override
     @Transactional(readOnly = true)
     public InventarioItemDTO obtenerStock(Long productoId, Long sucursalId) throws Exception {
-        // RBAC: validar acceso
-        Long sucursalReal = resolverSucursalId(sucursalId);
-        validarAccesoSucursal(sucursalReal);
-
         InventarioItem item = inventarioRepo
-                .findByProductoIdAndSucursalId(productoId, sucursalReal)
+                .findByProductoIdAndSucursalId(productoId, sucursalId)
                 .orElseThrow(() -> new Exception("Producto no encontrado en esta sucursal"));
         return toDTO(item);
     }
 
+    // ─── Interfaz: listarStockPorProducto ────────────────────
     @Override
     @Transactional(readOnly = true)
-    public List<InventarioItemDTO> stockEnRed(Long productoId) throws Exception {
-        String rol = obtenerRolActual();
-
-        if ("ADMINISTRADOR_GENERAL".equals(rol)) {
-            // Admin ve stock en TODAS las sucursales
-            return inventarioRepo.findByProductoId(productoId)
-                    .stream()
-                    .map(this::toDTO)
-                    .collect(Collectors.toList());
-        }
-
-        // Gerente/Operador: solo ven stock de su sucursal
-        // Pero también ven las demás sucursales (solo consulta, no acción)
-        // Esto cumple con "Comparte información de inventario con las demás
-        // sucursales" (Sección 2.1 del PDF)
+    public List<InventarioItemDTO> listarStockPorProducto(Long productoId) {
         return inventarioRepo.findByProductoId(productoId)
-                .stream()
-                .map(this::toDTO)
-                .collect(Collectors.toList());
+                .stream().map(this::toDTO).collect(Collectors.toList());
     }
 
+    // ─── Interfaz: listarStockBajoEnSucursal ─────────────────
     @Override
     @Transactional(readOnly = true)
-    public List<InventarioItemDTO> stockBajo(Long sucursalId) throws Exception {
-        // RBAC: forzar sucursal del usuario
-        Long sucursalReal = resolverSucursalId(sucursalId);
-        validarAccesoSucursal(sucursalReal);
-
-        return inventarioRepo.findStockBajoEnSucursal(sucursalReal)
-                .stream()
-                .map(this::toDTO)
-                .collect(Collectors.toList());
+    public List<InventarioItemDTO> listarStockBajoEnSucursal(Long sucursalId) {
+        return inventarioRepo.findStockBajoEnSucursal(sucursalId)
+                .stream().map(this::toDTO).collect(Collectors.toList());
     }
 
-    // ════════════════════════════════════════════════════════════
-    // AJUSTE DE STOCK
-    // ════════════════════════════════════════════════════════════
-
+    // ─── Interfaz: ajustarStock ───────────────────────────────
     @Override
-    public String ajustarStock(AjustarStockDTO dto) throws Exception {
-        // RBAC: validar que puede modificar esta sucursal
-        validarAccesoSucursal(dto.sucursalId());
-
+    public void ajustarStock(AjustarStockDTO dto, Long responsableId) throws Exception {
         Producto producto = productoRepo.findById(dto.productoId())
                 .orElseThrow(() -> new Exception("Producto no encontrado"));
         Sucursal sucursal = sucursalRepo.findById(dto.sucursalId())
                 .orElseThrow(() -> new Exception("Sucursal no encontrada"));
 
-        // Obtener o crear el registro de inventario
         InventarioItem item = inventarioRepo
                 .findByProductoIdAndSucursalId(dto.productoId(), dto.sucursalId())
                 .orElseGet(() -> {
@@ -226,26 +78,23 @@ public class InventarioServicioImpl implements InventarioServicio {
                     nuevo.setSucursal(sucursal);
                     nuevo.setCantidadDisponible(0);
                     nuevo.setCantidadReservada(0);
-                    nuevo.setStockMinimo(producto.getStockMinimoGlobal() != null ? producto.getStockMinimoGlobal() : 0);
+                    nuevo.setStockMinimo(
+                            producto.getStockMinimoGlobal() != null
+                                    ? producto.getStockMinimoGlobal() : 0);
                     nuevo.setCostoPromedioLocal(BigDecimal.ZERO);
                     return nuevo;
                 });
 
         int cantidadAnterior = item.getCantidadDisponible();
+        boolean esIngreso = dto.tipo().name().startsWith("INGRESO");
+
         int cantidadNueva;
-
-        // Determinar si es ingreso o retiro
-        TipoMovimiento tipo = dto.tipo();
-        boolean esIngreso = tipo.name().startsWith("INGRESO");
-
         if (esIngreso) {
             cantidadNueva = cantidadAnterior + dto.cantidad();
         } else {
             if (cantidadAnterior < dto.cantidad()) {
-                throw new Exception(
-                        "Stock insuficiente. Disponible: " + cantidadAnterior +
-                                ", solicitado: " + dto.cantidad()
-                );
+                throw new Exception("Stock insuficiente. Disponible: " +
+                        cantidadAnterior + ", solicitado: " + dto.cantidad());
             }
             cantidadNueva = cantidadAnterior - dto.cantidad();
         }
@@ -253,89 +102,67 @@ public class InventarioServicioImpl implements InventarioServicio {
         item.setCantidadDisponible(cantidadNueva);
         inventarioRepo.save(item);
 
-        // Registrar movimiento de trazabilidad
-        Usuario responsable = usuarioRepo.findById(obtenerUsuarioIdActual())
+        // Trazabilidad
+        Usuario responsable = usuarioRepo.findById(responsableId)
                 .orElseThrow(() -> new Exception("Usuario responsable no encontrado"));
 
-        MovimientoInventario movimiento = new MovimientoInventario();
-        movimiento.setProducto(producto);
-        movimiento.setSucursal(sucursal);
-        movimiento.setTipo(tipo);
-        movimiento.setCantidad(dto.cantidad());
-        movimiento.setCantidadAnterior(cantidadAnterior);
-        movimiento.setCantidadPosterior(cantidadNueva);
-        movimiento.setMotivo(dto.motivo());
-        movimiento.setDocumentoReferencia(dto.documentoReferencia());
-        movimiento.setResponsable(responsable);
-        movimientoRepo.save(movimiento);
+        MovimientoInventario mov = new MovimientoInventario();
+        mov.setProducto(producto);
+        mov.setSucursal(sucursal);
+        mov.setTipo(dto.tipo());
+        mov.setCantidad(dto.cantidad());
+        mov.setCantidadAnterior(cantidadAnterior);
+        mov.setCantidadPosterior(cantidadNueva);
+        mov.setMotivo(dto.motivo());
+        mov.setDocumentoReferencia(dto.documentoReferencia());
+        mov.setResponsable(responsable);
+        movimientoRepo.save(mov);
 
-        // Verificar si genera alerta de stock bajo
         verificarAlertasStock(item, producto, sucursal);
-
-        return "Stock ajustado correctamente. " + producto.getNombre() +
-                ": " + cantidadAnterior + " → " + cantidadNueva;
     }
 
-    // ════════════════════════════════════════════════════════════
-    // CONFIGURAR MÍNIMOS (solo Gerente/Admin)
-    // ════════════════════════════════════════════════════════════
-
+    // ─── Interfaz: configurarStockMinimo ─────────────────────
     @Override
-    public InventarioItemDTO configurarMinimos(
+    public InventarioItemDTO configurarStockMinimo(
             Long productoId, Long sucursalId,
             Integer stockMinimo, Integer stockMaximo) throws Exception {
-        // RBAC: validar acceso
-        validarAccesoSucursal(sucursalId);
-
-        // Validar rol: solo Gerente o Admin puede configurar mínimos
-        String rol = obtenerRolActual();
-        if ("OPERADOR_INVENTARIO".equals(rol)) {
-            throw new Exception("Solo Gerentes y Administradores pueden configurar stock mínimo/máximo");
-        }
 
         InventarioItem item = inventarioRepo
                 .findByProductoIdAndSucursalId(productoId, sucursalId)
-                .orElseThrow(() -> new Exception("Producto no encontrado en esta sucursal"));
+                .orElseThrow(() -> new Exception(
+                        "Producto no encontrado en esta sucursal"));
 
         item.setStockMinimo(stockMinimo);
-        if (stockMaximo != null) {
-            item.setStockMaximo(stockMaximo);
-        }
+        if (stockMaximo != null) item.setStockMaximo(stockMaximo);
         inventarioRepo.save(item);
-
         return toDTO(item);
     }
 
-    // ════════════════════════════════════════════════════════════
-    // MÉTODOS PRIVADOS
-    // ════════════════════════════════════════════════════════════
-
-    /**
-     * Genera alertas automáticas cuando el stock cae por debajo
-     * del mínimo o llega a cero. No crea duplicados.
-     */
+    // ─── Privados ─────────────────────────────────────────────
     private void verificarAlertasStock(
             InventarioItem item, Producto producto, Sucursal sucursal) {
 
-        int stock = item.getCantidadDisponible();
-        int minimo = item.getStockMinimo() != null ? item.getStockMinimo() : 0;
+        int stock   = item.getCantidadDisponible();
+        int minimo  = item.getStockMinimo() != null ? item.getStockMinimo() : 0;
 
         if (stock == 0) {
             crearAlertaSiNoExiste(TipoAlerta.STOCK_AGOTADO, producto, sucursal,
-                    "Stock agotado de " + producto.getNombre() + " en " + sucursal.getNombre());
+                    "Stock agotado: " + producto.getNombre() +
+                            " en " + sucursal.getNombre());
         } else if (stock <= minimo) {
             crearAlertaSiNoExiste(TipoAlerta.STOCK_MINIMO, producto, sucursal,
-                    "Stock bajo de " + producto.getNombre() + " en " + sucursal.getNombre() +
-                            ": " + stock + " unidades (mínimo: " + minimo + ")");
+                    "Stock bajo: " + producto.getNombre() +
+                            " en " + sucursal.getNombre() +
+                            " (" + stock + " uds, mínimo: " + minimo + ")");
         }
     }
 
     private void crearAlertaSiNoExiste(
-            TipoAlerta tipo, Producto producto, Sucursal sucursal, String mensaje) {
-        boolean yaExiste = alertaRepo
-                .findBySucursalIdAndProductoIdAndTipoAndEstado(
-                        sucursal.getId(), producto.getId(), tipo, EstadoAlerta.ACTIVA)
-                .isPresent();
+            TipoAlerta tipo, Producto producto,
+            Sucursal sucursal, String mensaje) {
+
+        boolean yaExiste = alertaRepo.existeAlertaActivaParaProducto(
+                sucursal.getId(), producto.getId(), tipo);
 
         if (!yaExiste) {
             Alerta alerta = new Alerta();
@@ -348,9 +175,6 @@ public class InventarioServicioImpl implements InventarioServicio {
         }
     }
 
-    /**
-     * Convierte entidad a DTO de respuesta.
-     */
     private InventarioItemDTO toDTO(InventarioItem item) {
         return new InventarioItemDTO(
                 item.getId(),
@@ -367,9 +191,62 @@ public class InventarioServicioImpl implements InventarioServicio {
                 item.getStockMinimo() != null ? item.getStockMinimo() : 0,
                 item.getStockMaximo(),
                 item.getCostoPromedioLocal(),
-                item.getCantidadDisponible() <= (item.getStockMinimo() != null ? item.getStockMinimo() : 0),
-                item.getUltimaActualizacion() != null
-                        ? item.getUltimaActualizacion().toString() : null
+                item.getCantidadDisponible() <= (
+                        item.getStockMinimo() != null ? item.getStockMinimo() : 0),
+                item.getUltimaActualizacion()   // ← LocalDateTime directo, sin .toString()
         );
+    }
+
+    // ─── Métodos helper para otros servicios ─────────────────
+
+    /**
+     * Obtiene o crea un InventarioItem para producto+sucursal.
+     * Usado por OrdenCompraServicio y TransferenciaServicio.
+     */
+    public InventarioItem obtenerOCrearItem(Long productoId, Long sucursalId) throws Exception {
+        Producto producto = productoRepo.findById(productoId)
+                .orElseThrow(() -> new Exception("Producto no encontrado: " + productoId));
+        Sucursal sucursal = sucursalRepo.findById(sucursalId)
+                .orElseThrow(() -> new Exception("Sucursal no encontrada: " + sucursalId));
+
+        return inventarioRepo.findByProductoIdAndSucursalId(productoId, sucursalId)
+                .orElseGet(() -> {
+                    InventarioItem nuevo = new InventarioItem();
+                    nuevo.setProducto(producto);
+                    nuevo.setSucursal(sucursal);
+                    nuevo.setCantidadDisponible(0);
+                    nuevo.setCantidadReservada(0);
+                    nuevo.setStockMinimo(
+                            producto.getStockMinimoGlobal() != null
+                                    ? producto.getStockMinimoGlobal() : 0);
+                    nuevo.setCostoPromedioLocal(BigDecimal.ZERO);
+                    return inventarioRepo.save(nuevo);
+                });
+    }
+
+    /**
+     * Actualiza el costo promedio ponderado al recibir mercancía.
+     * Fórmula: (stockActual × costoActual + cantidadNueva × costoNuevo) / (stockActual + cantidadNueva)
+     */
+    public void actualizarCostoPromedio(InventarioItem item,
+                                        int cantidadNueva,
+                                        BigDecimal costoNuevo) {
+        if (costoNuevo == null || costoNuevo.compareTo(BigDecimal.ZERO) == 0) return;
+
+        int stockActual = item.getCantidadDisponible();
+        BigDecimal costoActual = item.getCostoPromedioLocal() != null
+                ? item.getCostoPromedioLocal() : BigDecimal.ZERO;
+
+        if (stockActual == 0) {
+            item.setCostoPromedioLocal(costoNuevo);
+        } else {
+            BigDecimal totalActual = costoActual.multiply(BigDecimal.valueOf(stockActual));
+            BigDecimal totalNuevo  = costoNuevo.multiply(BigDecimal.valueOf(cantidadNueva));
+            BigDecimal totalUnidades = BigDecimal.valueOf(stockActual + cantidadNueva);
+            item.setCostoPromedioLocal(
+                    totalActual.add(totalNuevo).divide(totalUnidades,
+                            2, java.math.RoundingMode.HALF_UP));
+        }
+        inventarioRepo.save(item);
     }
 }

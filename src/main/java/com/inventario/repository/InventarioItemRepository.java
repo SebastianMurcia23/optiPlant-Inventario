@@ -61,4 +61,6 @@ public interface InventarioItemRepository extends JpaRepository<InventarioItem, 
         ORDER BY i.cantidadDisponible DESC
     """)
     List<InventarioItem> findStockPorSucursalParaProducto(Long productoId);
+    @Query("SELECT i FROM InventarioItem i WHERE i.sucursal.id = :sucursalId AND i.cantidadDisponible <= i.stockMinimo")
+    List<InventarioItem> findStockBajoEnSucursal(Long sucursalId);
 }
